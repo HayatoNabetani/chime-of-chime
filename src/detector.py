@@ -11,6 +11,8 @@
   CHIME_RMS=0.003      エネルギー閾値を上書き
   CHIME_FLATNESS=0.3   平坦度しきい値(これ以上はノイズ扱い)
   CHIME_PROM=8         ピーク優位性の下限
+  CHIME_SR=44100       サンプルレート (Pi の overflow 対策に 22050 推奨)
+  CHIME_BLOCK=2048     FFTブロックサイズ (大きくするほどコールバック頻度低下)
 """
 
 import os
@@ -58,6 +60,8 @@ class DetectorConfig:
             default_prom = 8.0
 
         return cls(
+            sample_rate=int(os.getenv("CHIME_SR", "44100")),
+            block_size=int(os.getenv("CHIME_BLOCK", "2048")),
             energy_threshold=float(os.getenv("CHIME_RMS", "0.003")),
             flatness_max=float(os.getenv("CHIME_FLATNESS", str(default_flat))),
             prominence_min=float(os.getenv("CHIME_PROM", str(default_prom))),
@@ -229,6 +233,7 @@ def run(profile_path: str | Path = DEFAULT_PROFILE_PATH) -> None:
         blocksize=config.block_size,
         channels=1,
         dtype="float32",
+        latency="high",
         callback=callback,
     ):
         try:

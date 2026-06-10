@@ -1,0 +1,19 @@
+[Unit]
+Description=Chime of Chime - doorbell detector
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Desktop/dev/chime-of-chime
+EnvironmentFile=%h/Desktop/dev/chime-of-chime/.env
+Environment=CHIME_SR=22050
+Environment=CHIME_BLOCK=2048
+ExecStart=/usr/bin/env uv run python main.py detect
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

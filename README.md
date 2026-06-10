@@ -101,11 +101,81 @@ CHIME_DRY_RUN=1 uv run python main.py detect
 | `CHIME_RMS` | `0.003` | マイク入力の最小音量 (RMS)。小さいほど敏感 |
 | `CHIME_FLATNESS` | プロファイル依存 | スペクトル平坦度の上限。小さいほど「純音らしさ」を厳しく要求 |
 | `CHIME_PROM` | プロファイル依存 | ピーク優位性の下限。大きいほど厳しい |
+| `CHIME_SR` | `44100` | マイクのサンプルレート。Piでoverflowが出るなら`22050`へ |
+| `CHIME_BLOCK` | `2048` | FFTブロックサイズ。大きいほどコールバック頻度が下がる |
 | `CHIME_DEBUG` | `0` | `1`で全フレームの判定ログを出力 |
 | `CHIME_DRY_RUN` | `0` | `1`で通知を送らず検知ログのみ出力 |
 
 プロファイル作成時に自動で算出される推奨値が`chime_profile.json`の`suggested_*`フィールドに入り、
 `detect`時のデフォルト値として使われます。環境変数で明示すると上書きできます。
+
+## Raspberry Piで常駐させる
+
+SSHを切ってもチャイム検知を動かし続けるには `systemd` のユーザサービスとして登録するのが楽です。
+`cron @reboot` でも起動はできますが、クラッシュ時の自動再復帰やログ管理は systemd の方が圧倒的にラク。
+
+### 1. `input overflow` 対策
+
+```
+⚠️ stream status: input overflow
+```
+
+これは PortAudio のリングバッファが Python 側の処理に追いつかれず取りこぼしている状態。
+チャイムは~1kHz帯なのでサンプルレートを下げれば十分に検知できます:
+
+```bash
+CHIME_SR=22050 CHIME_BLOCK=2048 uv run python main.py detect
+```
+
+`InputStream(latency="high")` も既に指定済み。それでもなお出る場合は `CHIME_BLOCK=4096` を試す。
+
+### 2. サービス登録
+
+リポジトリ同梱の `scripts/chime-detector.service` を `~/.config/systemd/user/` に置きます:
+
+```bash
+# (Pi 上で)
+mkdir -p ~/.config/systemd/user
+cp ~/Desktop/dev/chime-of-chime/scripts/chime-detector.service ~/.config/systemd/user/
+
+# uv のフルパスに合わせて ExecStart を編集 (`which uv` で確認)
+vim ~/.config/systemd/user/chime-detector.service
+
+systemctl --user daemon-reload
+systemctl --user enable --now chime-detector.service
+
+# ログ
+journalctl --user -u chime-detector.service -f
+
+# 状態
+systemctl --user status chime-detector.service
+```
+
+### 3. SSH切断後 / 再起動後も生き残らせる
+
+ユーザサービスはデフォルトだとログアウト時に停止します。再起動後も含めて自走させるには **linger** を有効化:
+
+```bash
+sudo loginctl enable-linger $USER
+```
+
+これで Pi をリブートしてもログイン不要で自動起動 → クラッシュ時は5秒後に自動再起動、になります。
+
+### 4. デバイス選択 (任意)
+
+USBマイクが複数あるとデフォルト入力が想定外になることがあります。確認:
+
+```bash
+uv run python -c "import sounddevice as sd; print(sd.query_devices())"
+```
+
+特定のデバイスに固定したいなら `~/.asoundrc` で ALSA デフォルト入力を指定するのが手軽:
+
+```
+pcm.!default { type asym capture.pcm "plughw:2,0" }
+```
+
+(`plughw:<card>,<device>` の数字は `arecord -l` で確認)
 
 ## プロジェクト構成
 
@@ -116,6 +186,8 @@ chime-of-chime/
 ├── chime_profile.json       プロファイル (record時に生成)
 ├── recordings/              プロファイル作成時の録音WAV
 ├── pyproject.toml
+├── scripts/
+│   └── chime-detector.service  systemdユーザサービステンプレ
 └── src/
     ├── features.py          FFT / スペクトル特徴量抽出
     ├── profile.py           ChimeProfile dataclass + I/O
