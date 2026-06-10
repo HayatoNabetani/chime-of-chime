@@ -136,21 +136,35 @@ CHIME_BLOCK=4096 uv run python main.py detect
 リポジトリ同梱の `scripts/chime-detector.service` を `~/.config/systemd/user/` に置きます:
 
 ```bash
-# (Pi 上で)
+# (Pi 上で。先にgit pullで最新化しておく)
+cd ~/Desktop/dev/chime-of-chime
+git pull
+
 mkdir -p ~/.config/systemd/user
-cp ~/Desktop/dev/chime-of-chime/scripts/chime-detector.service ~/.config/systemd/user/
+cp scripts/chime-detector.service ~/.config/systemd/user/
+```
 
-# uv のフルパスに合わせて ExecStart を編集 (`which uv` で確認)
-vim ~/.config/systemd/user/chime-detector.service
+`ExecStart=` の `uv` のパスを実環境に合わせて差し替えます。Raspbian標準では vim/nano のどちらかが入っているはず(vim が無ければ `sudo apt install -y vim` でインストール、または `nano` を使ってもOK):
 
+```bash
+which uv                                              # 例: /home/hnabetani/.local/bin/uv
+vim ~/.config/systemd/user/chime-detector.service     # ExecStart の /usr/bin/env uv を which uv の結果に置換
+```
+
+非対話で一発置換したい場合:
+
+```bash
+UV_PATH=$(which uv)
+sed -i "s|/usr/bin/env uv|$UV_PATH|" ~/.config/systemd/user/chime-detector.service
+grep ExecStart ~/.config/systemd/user/chime-detector.service   # 確認
+```
+
+サービスを起動:
+
+```bash
 systemctl --user daemon-reload
 systemctl --user enable --now chime-detector.service
-
-# ログ
-journalctl --user -u chime-detector.service -f
-
-# 状態
-systemctl --user status chime-detector.service
+systemctl --user status chime-detector.service        # Active: active (running) になればOK
 ```
 
 ### 3. SSH切断後 / 再起動後も生き残らせる
@@ -163,15 +177,78 @@ sudo loginctl enable-linger $USER
 
 これで Pi をリブートしてもログイン不要で自動起動 → クラッシュ時は5秒後に自動再起動、になります。
 
-### 4. デバイス選択 (任意)
+### 4. 動作確認
 
-USBマイクが複数あるとデフォルト入力が想定外になることがあります。確認:
+実際にチャイムを鳴らして、LINE通知が飛んでくることを確認します。ログをtailしながら鳴らすのが分かりやすい:
+
+```bash
+journalctl --user -u chime-detector.service -f
+```
+
+`🔔 チャイム検知!` と `✅ LINE送信成功` が出れば完成。
+
+### 5. 運用コマンド
+
+```bash
+systemctl --user status chime-detector.service        # 状態確認
+systemctl --user restart chime-detector.service       # プロファイル更新後など
+systemctl --user stop chime-detector.service          # 一時停止
+systemctl --user disable --now chime-detector.service # 自動起動を解除
+journalctl --user -u chime-detector.service -f        # ログtail
+journalctl --user -u chime-detector.service --since today  # 今日のログ
+journalctl --user -u chime-detector.service | grep overflow | wc -l  # overflowの発生件数
+```
+
+サービスに渡されている環境変数の確認:
+
+```bash
+systemctl --user show chime-detector.service -p Environment
+```
+
+### 6. トラブルシューティング
+
+#### `No journal files were found`
+
+`enable --now` 直後だと journal がまだ書かれていないので出ることがあります。数秒〜数十秒待ってから再度 `journalctl --user -u chime-detector.service -f` で取れるか確認。永続化されていないだけの場合は:
+
+```bash
+sudo mkdir -p /var/log/journal
+sudo systemd-tmpfiles --create --prefix /var/log/journal
+sudo systemctl restart systemd-journald
+```
+
+#### 起動時に1〜2件だけ `⚠️ stream status: input overflow`
+
+PortAudioのストリーム初期化時に出る一過性の警告。継続発生していなければ無視してOK。継続発生している場合は次項。
+
+#### `input overflow` が連続して出続ける
+
+CPU負荷が追いついていない状態。順に試す:
+
+1. `Environment=CHIME_BLOCK=8192` に増やす(ブロックを倍に)
+2. service に `Nice=-5` を追加してプロセス優先度を上げる
+3. それでもダメなら `Environment=CHIME_SR=48000` を追加(マイクが48kHz対応の場合)
+
+編集後は `systemctl --user daemon-reload && systemctl --user restart chime-detector.service`。
+
+#### `paInvalidSampleRate` で起動失敗
+
+USBマイクが要求のサンプルレートに非対応。マイクの対応レートを確認:
+
+```bash
+arecord -l                                              # カードと device 番号
+arecord --dump-hw-params -D plughw:2,0 /dev/null        # RATE: 行を確認
+```
+
+`CHIME_SR` を対応値(通常 44100 or 48000)に合わせる。
+
+#### USBマイクが複数 / デフォルト入力が想定外
 
 ```bash
 uv run python -c "import sounddevice as sd; print(sd.query_devices())"
 ```
 
-特定のデバイスに固定したいなら `~/.asoundrc` で ALSA デフォルト入力を指定するのが手軽:
+特定のデバイスに固定したいなら `~/.asoundrc` で ALSA デフォルト入力を指定:
 
 ```
 pcm.!default { type asym capture.pcm "plughw:2,0" }
