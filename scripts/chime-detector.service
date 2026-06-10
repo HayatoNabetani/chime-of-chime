@@ -7,8 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/Desktop/dev/chime-of-chime
 EnvironmentFile=%h/Desktop/dev/chime-of-chime/.env
-Environment=CHIME_SR=22050
-Environment=CHIME_BLOCK=2048
+Environment=CHIME_BLOCK=4096
 ExecStart=/usr/bin/env uv run python main.py detect
 Restart=always
 RestartSec=5

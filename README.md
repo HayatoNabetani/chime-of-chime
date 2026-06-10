@@ -121,13 +121,15 @@ SSHを切ってもチャイム検知を動かし続けるには `systemd` のユ
 ```
 
 これは PortAudio のリングバッファが Python 側の処理に追いつかれず取りこぼしている状態。
-チャイムは~1kHz帯なのでサンプルレートを下げれば十分に検知できます:
+**`CHIME_BLOCK=4096` でブロックサイズを倍に**するのが最も効きます(コールバック頻度が半分になりPiのCPU負荷が大幅に下がる)。Raspberry Pi 4 + USBマイクで検証済み:
 
 ```bash
-CHIME_SR=22050 CHIME_BLOCK=2048 uv run python main.py detect
+CHIME_BLOCK=4096 uv run python main.py detect
 ```
 
-`InputStream(latency="high")` も既に指定済み。それでもなお出る場合は `CHIME_BLOCK=4096` を試す。
+`InputStream(latency="high")` は既に指定済み。
+
+> ⚠️ サンプルレートを下げる(`CHIME_SR=22050`)方法は、USBマイクが 22050Hz をネイティブサポートしていないと `paInvalidSampleRate` で起動失敗します。多くのUSBマイクは 44100/48000 のみ対応なので、まず `CHIME_BLOCK=4096` を試すのが安全。マイクの対応レートは `arecord --dump-hw-params -D plughw:<card>,<dev> /dev/null` で確認できます。
 
 ### 2. サービス登録
 
