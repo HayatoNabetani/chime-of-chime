@@ -8,6 +8,9 @@ Type=simple
 WorkingDirectory=%h/Desktop/dev/chime-of-chime
 EnvironmentFile=%h/Desktop/dev/chime-of-chime/.env
 Environment=CHIME_BLOCK=4096
+# USB再認識で card 番号がズレても名前で掴めるよう、デバイスは名前の部分一致で固定。
+# `arecord -l` の [...] 内の名前に合わせる。デフォルト任せにすると再認識時に -1 で死ぬ。
+Environment="CHIME_DEVICE=USB PnP"
 ExecStart=/usr/bin/env uv run python main.py detect
 Restart=always
 RestartSec=5

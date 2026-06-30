@@ -231,6 +231,35 @@ CPU負荷が追いついていない状態。順に試す:
 
 編集後は `systemctl --user daemon-reload && systemctl --user restart chime-detector.service`。
 
+#### `PortAudioError: Error querying device -1` / チャイムに無反応になった
+
+USBマイクが**再認識でcard番号がズレ**、システムのデフォルト入力デバイスが無効になった状態。
+`-1` は「デフォルト入力デバイス無し」の意味。マイク自体は生きていることが多い。常駐プロセスは
+古いデバイスを掴んだまま生き続け、無音を拾って `input overflow` だけ出す（=チャイムに無反応）。
+
+```bash
+arecord -l        # card N: [USB PnP Sound Device] のように生きていれば物理脱落ではない
+lsusb             # マイクがバス上に居るか
+```
+
+マイクが `arecord -l` に出るなら、デフォルト任せをやめて **`CHIME_DEVICE` で名前指定**して固定する。
+名前の部分一致なので、今後 card 番号がズレても追従する:
+
+```bash
+# service に追記済み（scripts/chime-detector.service）。名前は arecord -l の [...] に合わせる
+Environment="CHIME_DEVICE=USB PnP"
+```
+
+手元で素早く確認するには:
+
+```bash
+systemctl --user stop chime-detector.service          # デバイス解放
+CHIME_DEVICE="USB PnP" uv run python main.py detect    # 🎙 入力デバイス: [N] ... が出ればOK
+```
+
+マイクが `arecord -l` にも出ない場合は物理脱落。**セルフパワーUSBハブ経由**で挿し直す
+（Pi のポート直挿しは電力不足で脱落しやすい）。
+
 #### `paInvalidSampleRate` で起動失敗
 
 USBマイクが要求のサンプルレートに非対応。マイクの対応レートを確認:

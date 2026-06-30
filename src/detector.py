@@ -13,6 +13,9 @@
   CHIME_PROM=8         ピーク優位性の下限
   CHIME_SR=44100       サンプルレート (Pi の overflow 対策に 22050 推奨)
   CHIME_BLOCK=2048     FFTブロックサイズ (大きくするほどコールバック頻度低下)
+  CHIME_DEVICE         入力デバイス。数字ならインデックス、文字列なら名前の部分一致
+                       (例 CHIME_DEVICE="USB PnP")。未指定だとシステムのデフォルト。
+                       USB再認識でcard番号がズレても名前で掴めるよう名前指定推奨。
 """
 
 import os
@@ -29,10 +32,19 @@ from .notifiers import Notifier, build_notifier_from_env
 from .profile import ChimeProfile, DEFAULT_PROFILE_PATH
 
 
+def _parse_device(value: str | None) -> str | int | None:
+    """CHIME_DEVICE を解釈する。数字ならインデックス、それ以外は名前の部分一致。"""
+    if value is None or value.strip() == "":
+        return None
+    value = value.strip()
+    return int(value) if value.isdigit() else value
+
+
 @dataclass
 class DetectorConfig:
     sample_rate: int = 44100
     block_size: int = 2048  # 約46ms / 周波数分解能 ~21.5Hz
+    input_device: str | int | None = None
     freq_min: float = 150.0
     freq_max: float = 4000.0
     cooldown_sec: float = 10.0
@@ -62,6 +74,7 @@ class DetectorConfig:
         return cls(
             sample_rate=int(os.getenv("CHIME_SR", "44100")),
             block_size=int(os.getenv("CHIME_BLOCK", "2048")),
+            input_device=_parse_device(os.getenv("CHIME_DEVICE")),
             energy_threshold=float(os.getenv("CHIME_RMS", "0.003")),
             flatness_max=float(os.getenv("CHIME_FLATNESS", str(default_flat))),
             prominence_min=float(os.getenv("CHIME_PROM", str(default_prom))),
@@ -217,6 +230,15 @@ def run(profile_path: str | Path = DEFAULT_PROFILE_PATH) -> None:
     notifier = build_notifier_from_env()
     detector = ChimeDetector(profile, config, notifier)
 
+    try:
+        dev_info = sd.query_devices(config.input_device, kind="input")
+        print(f"🎙  入力デバイス: [{dev_info['index']}] {dev_info['name']}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"❌ 入力デバイスが見つかりません (CHIME_DEVICE={config.input_device!r}): {exc}")
+        print("   `arecord -l` で card 番号を確認し CHIME_DEVICE で指定してください。")
+        print("   例: CHIME_DEVICE=\"USB PnP\"  (名前の部分一致。card番号がズレても追従)")
+        raise SystemExit(1)
+
     audio_q: queue.Queue[tuple[int, np.ndarray]] = queue.Queue()
     samples_seen = 0
 
@@ -231,6 +253,7 @@ def run(profile_path: str | Path = DEFAULT_PROFILE_PATH) -> None:
     with sd.InputStream(
         samplerate=config.sample_rate,
         blocksize=config.block_size,
+        device=config.input_device,
         channels=1,
         dtype="float32",
         latency="high",
