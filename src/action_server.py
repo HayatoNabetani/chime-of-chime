@@ -293,7 +293,7 @@ def serve_from_env() -> None:
 
 def start_in_background_from_env() -> ThreadingHTTPServer | None:
     load_dotenv()
-    if os.getenv("ACTION_SERVER_ENABLED", "1") != "1":
+    if os.getenv("ACTION_SERVER_ENABLED", "0") != "1":
         return None
     targets = {
         part.strip().lower() for part in os.getenv("NOTIFIER", "console").split(",")

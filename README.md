@@ -80,6 +80,11 @@ CHIME_DRY_RUN=1 uv run python main.py detect
 ```bash
 uv sync
 uv run python -m unittest discover -s tests -v
+
+# Cloudflare Worker
+cd worker
+npm ci
+npm test
 ```
 
 自動テストではSwitchBot API、LINE API、マイク入力をモックしているため、実際の通知送信や
@@ -132,13 +137,10 @@ uvx ruff format src tests main.py
 
 ### LINE連携の結合テスト
 
-操作Webhookサーバーを起動した状態で、別のターミナルからテスト通知を送信します。
+後述のCloudflare WorkerをデプロイしてLINE DevelopersのWebhook URLを設定した後、
+Raspberry Piまたは開発PCからテスト通知を送信します。
 
 ```bash
-# ターミナル1
-uv run python main.py serve-actions
-
-# ターミナル2
 uv run python main.py test-notify
 ```
 
@@ -149,7 +151,12 @@ LINEに届いた通知で次を確認します。
 3. 確認画面の`キャンセル`ではBotが動かない
 4. 再度操作し、60秒以内に`解錠する`を選ぶと解錠用Botが1回だけ動く
 
-Webhookをインターネット経由で確認する場合は、後述のLINE Webhook公開設定も必要です。
+Workerのログは別のターミナルで確認できます。
+
+```bash
+cd worker
+npx wrangler tail
+```
 
 ## 通知先の切り替え
 
@@ -196,8 +203,8 @@ SWITCHBOT_SECRET=...
 SWITCHBOT_INTERCOM_DEVICE_ID=...
 SWITCHBOT_UNLOCK_DEVICE_ID=...
 
-ACTION_SERVER_ENABLED=1
-ACTION_SERVER_PORT=8080
+# WebhookはCloudflare Workerで受信するため、Pi側では起動しない
+ACTION_SERVER_ENABLED=0
 ```
 
 ### 2. SwitchBot単体の動作確認
@@ -221,40 +228,110 @@ Device IDがまだ分からない場合は、メニューの`1. デバイス一�
 
 `unlock --yes`は確認なしで物理ボタンを押すため、自動テスト以外では使用を避けてください。
 
-### 3. LINE Webhookを公開
+### 3. Cloudflare Workerをデプロイ（推奨）
 
-LINEのpostbackを受けるため、Raspberry Piの`8080`番ポートをCloudflare TunnelなどでHTTPS公開し、
-LINE DevelopersのWebhook URLに次を設定します。
+LINEのpostbackは`worker/`のCloudflare Workerで受信します。Cloudflare Tunnelや独自ドメインは不要で、
+デプロイ時に固定の`https://chime-of-chime-webhook.<サブドメイン>.workers.dev`が発行されます。
+WorkerがLINE署名とユーザーIDを検証し、SwitchBot APIを直接呼び出します。そのため、Raspberry Piへ
+外部から到達できるポートを開ける必要はありません。
+
+参考: [Workers.dev](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/)、
+[LINE Webhook署名検証](https://developers.line.biz/en/docs/messaging-api/verify-webhook-signature/)
+
+必要なものはNode.js 20以降とCloudflareアカウントです。初回だけ次を実行します。
+
+```bash
+cd worker
+npm install
+npx wrangler login
+
+# D1データベースを作成し、DB bindingをwrangler.jsoncへ自動追記
+npx wrangler d1 create chime-of-chime-actions --location apac --binding DB --update-config
+
+# 二重実行防止・解錠確認用テーブルを作成
+npx wrangler d1 execute chime-of-chime-actions --remote --file=./schema.sql
+```
+
+続いて秘密情報をWorker Secretsへ登録します。コマンドごとに値の入力を求められます。
+値は`wrangler.jsonc`やGitには書かないでください。
+
+```bash
+npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
+npx wrangler secret put LINE_CHANNEL_SECRET
+npx wrangler secret put LINE_USER_ID
+npx wrangler secret put SWITCHBOT_TOKEN
+npx wrangler secret put SWITCHBOT_SECRET
+npx wrangler secret put SWITCHBOT_INTERCOM_DEVICE_ID
+npx wrangler secret put SWITCHBOT_UNLOCK_DEVICE_ID
+```
+
+テスト後にデプロイします。
+
+```bash
+npm test
+npm run deploy
+```
+
+デプロイ結果に表示されたURLへ`/line/webhook`を付け、LINE DevelopersのMessaging APIチャネルで
+Webhook URLに設定します。
 
 ```text
-https://<公開ホスト名>/line/webhook
+https://chime-of-chime-webhook.<サブドメイン>.workers.dev/line/webhook
 ```
 
-Webhookの「利用」をONにし、「検証」が成功することを確認してください。受信時は
-`X-Line-Signature`を`LINE_CHANNEL_SECRET`で検証し、さらに`LINE_USER_ID`が一致する操作だけを許可します。
-
-`detect`実行中は操作サーバーも同じプロセス内で自動起動します。
-必要な設定が不足している場合は、操作不能なボタンを送らないよう起動時に停止します。
+Webhookの「検証」を実行して成功することを確認し、「Webhookの利用」をONにします。
+ヘルスチェックはブラウザまたは次のコマンドで確認できます。
 
 ```bash
-uv run python main.py detect
+curl https://chime-of-chime-webhook.<サブドメイン>.workers.dev/health
+# {"ok":true}
 ```
 
-操作サーバーだけを単独起動したい場合は次を使います（この場合、`detect`側では
-`ACTION_SERVER_ENABLED=0`にしてポートの重複を避けてください）。
+最後にRaspberry Piの`.env`を次の状態にします。LINE通知の送信にはPi側にも
+`LINE_CHANNEL_ACCESS_TOKEN`と`LINE_USER_ID`が必要ですが、Webhook受信用の
+`LINE_CHANNEL_SECRET`とSwitchBotの秘密情報はWorker側だけでも動作します。
+
+```dotenv
+NOTIFIER=line
+ACTION_SERVER_ENABLED=0
+```
+
+設定変更後は検知サービスを再起動します。
 
 ```bash
-uv run python main.py serve-actions
+systemctl --user restart chime-detector.service
+systemctl --user status chime-detector.service --no-pager -l
 ```
 
-通知UIだけを確認するには、操作サーバーを起動した状態で次を実行します。
+#### Workerを更新する
+
+コードをpullしただけではデプロイ済みWorkerは更新されません。Workerに変更がある場合は次を実行します。
 
 ```bash
-uv run python main.py test-notify
+git pull --ff-only
+cd worker
+npm ci
+npm test
+npx wrangler deploy
 ```
 
-> 解錠は安全に直結する操作です。Webhook URLだけに頼らず、署名検証を無効化しないでください。
-> 解錠確認は60秒・1回限り有効です。LINEの再配信による同一イベントの二重実行も抑止します。
+`schema.sql`が変更された場合は、デプロイ前に次も実行します。現在のSQLは何度実行しても安全です。
+
+```bash
+npx wrangler d1 execute chime-of-chime-actions --remote --file=./schema.sql
+```
+
+ログをリアルタイム表示する場合は`npx wrangler tail`を使います。
+
+#### ローカルPython Webhookを使う場合（代替）
+
+Workerを使わず、従来どおりRaspberry PiのPythonサーバーをCloudflare Tunnelなどで公開することもできます。
+その場合だけPiの`.env`を`ACTION_SERVER_ENABLED=1`にし、公開URLの
+`https://<公開ホスト名>/line/webhook`をLINEへ設定してください。操作サーバーだけなら
+`uv run python main.py serve-actions`で起動できます。
+
+> 解錠は安全に直結する操作です。Workerは`X-Line-Signature`、`LINE_USER_ID`、60秒・1回限りの
+> 解錠確認を検証します。D1によりLINEの再配信による同一イベントの二重実行も抑止します。
 
 ### Slack設定
 
@@ -511,6 +588,11 @@ chime-of-chime/
 ├── scripts/
 │   ├── chime-detector.service  systemdユーザサービステンプレ
 │   └── test-switchbot          SwitchBot対話テスト実行ファイル
+├── worker/                  Cloudflare Worker版LINE Webhook
+│   ├── src/index.js         署名検証 / SwitchBot操作 / 解錠確認
+│   ├── test/index.test.js   Worker自動テスト
+│   ├── schema.sql           D1テーブル定義
+│   └── wrangler.jsonc       Cloudflare設定
 ├── tests/
 │   ├── test_actions_and_notifier.py  LINE通知 / Webhook操作テスト
 │   ├── test_profile_and_recorder.py  プロファイル / 録音処理テスト
