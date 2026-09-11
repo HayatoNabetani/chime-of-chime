@@ -18,14 +18,13 @@ class LineNotifierTest(unittest.TestCase):
         message = post.call_args.kwargs["json"]["messages"][0]
         actions = message["template"]["actions"]
         self.assertEqual(len(actions), 2)
-        self.assertEqual(actions[0]["data"], "action=intercom_toggle")
+        self.assertEqual(actions[0]["data"], "action=intercom")
         self.assertEqual(actions[1]["data"], "action=unlock")
 
 
 class ActionControllerTest(unittest.TestCase):
     def setUp(self) -> None:
         self.switchbot = Mock()
-        self.switchbot.toggle.return_value = "ON"
         self.controller = ActionController(
             self.switchbot, "intercom", "unlock", "line-token", "allowed-user"
         )
@@ -41,11 +40,11 @@ class ActionControllerTest(unittest.TestCase):
             "postback": {"data": action},
         }
 
-    def test_intercom_toggles_and_replies(self) -> None:
-        self.controller.handle(self.event("action=intercom_toggle"))
-        self.switchbot.toggle.assert_called_once_with("intercom")
+    def test_intercom_presses_and_replies(self) -> None:
+        self.controller.handle(self.event("action=intercom"))
+        self.switchbot.press.assert_called_once_with("intercom")
         self.controller._reply_text.assert_called_once_with(
-            "reply", "🎧 インターホン音声をONにしました"
+            "reply", "🎧 インターホン用ボタンを押しました"
         )
 
     def test_unlock_requires_confirmation(self) -> None:

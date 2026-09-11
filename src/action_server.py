@@ -68,7 +68,7 @@ class ActionController:
         params = parse_qs(postback["data"], keep_blank_values=True)
         action = params.get("action", [""])[0]
         if action not in {
-            "intercom_toggle",
+            "intercom",
             "unlock",
             "unlock_confirmed",
             "unlock_cancel",
@@ -107,9 +107,9 @@ class ActionController:
 
         try:
             with self._lock:
-                if action == "intercom_toggle":
-                    state = self.switchbot.toggle(self.intercom_device_id)
-                    result = f"🎧 インターホン音声を{state}にしました"
+                if action == "intercom":
+                    self.switchbot.press(self.intercom_device_id)
+                    result = "🎧 インターホン用ボタンを押しました"
                 elif action == "unlock_confirmed":
                     expires_at = self._unlock_confirmations.pop(
                         confirmation_token, None

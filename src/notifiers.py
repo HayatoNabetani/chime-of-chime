@@ -58,8 +58,8 @@ class LineNotifier(Notifier):
                 "actions": [
                     {
                         "type": "postback",
-                        "label": "🎧 インターホン ON/OFF",
-                        "data": "action=intercom_toggle",
+                        "label": "🎧 インターホンを聞く",
+                        "data": "action=intercom",
                     },
                     {
                         "type": "postback",

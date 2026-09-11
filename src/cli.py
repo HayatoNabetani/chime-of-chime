@@ -92,9 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(
             "devices",
             "status",
-            "intercom-on",
-            "intercom-off",
-            "intercom-toggle",
+            "intercom",
             "unlock",
         ),
         help="省略すると対話メニューを表示",

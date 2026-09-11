@@ -10,10 +10,10 @@ class SwitchBotTesterTest(unittest.TestCase):
         self.devices = (self.client, "intercom-id", "unlock-id")
 
     @patch("src.switchbot_tester._build_from_env")
-    def test_intercom_on(self, build: Mock) -> None:
+    def test_intercom_press(self, build: Mock) -> None:
         build.return_value = self.devices
-        self.assertEqual(execute("intercom-on"), 0)
-        self.client.command.assert_called_once_with("intercom-id", "turnOn")
+        self.assertEqual(execute("intercom"), 0)
+        self.client.press.assert_called_once_with("intercom-id")
         build.assert_called_once_with(require_device_ids=True)
 
     @patch("src.switchbot_tester._build_from_env")

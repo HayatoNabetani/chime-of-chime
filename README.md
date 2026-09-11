@@ -1,7 +1,7 @@
 # chime-of-chime
 
 マイクで拾った環境音からチャイム(ピンポーン等の2音パターン)を検出し、LINE/Slackへ通知するツール。
-LINE通知には、SwitchBotでインターホン音声をON/OFFするボタンと玄関を解錠するボタンを表示できます。
+LINE通知には、SwitchBotでインターホン音声ボタンと玄関解錠ボタンを押すための操作を表示できます。
 Mac/Linux/Raspberry Pi で動作します。
 
 ## しくみ
@@ -85,7 +85,7 @@ uv run python -m unittest discover -s tests -v
 自動テストではSwitchBot API、LINE API、マイク入力をモックしているため、実際の通知送信や
 SwitchBotの物理操作は行いません。主に次の内容を確認しています。
 
-- SwitchBot OpenAPI v1.1の署名生成、デバイス取得、ON/OFF切替、APIエラー処理
+- SwitchBot OpenAPI v1.1の署名生成、デバイス取得、ボタン押下、APIエラー処理
 - LINE通知の2ボタン、Webhook署名検証、許可ユーザーの制限
 - 解錠の二段階確認、60秒の有効期限、確認トークンの再利用防止
 - プロファイルの保存・読み込み、録音フレームの境界処理
@@ -118,12 +118,10 @@ uvx ruff format src tests main.py
 ./scripts/test-switchbot status
 ```
 
-続いてインターホン用Botを確認します。以下は実際にBotを動かします。
+続いてインターホン用Botを確認します。以下は実際にボタンを1回押します。
 
 ```bash
-./scripts/test-switchbot intercom-on
-./scripts/test-switchbot intercom-off
-./scripts/test-switchbot intercom-toggle
+./scripts/test-switchbot intercom
 ```
 
 最後に、安全を確認したうえで解錠用Botをテストします。`unlock`と再入力しない限り実行されません。
@@ -146,7 +144,7 @@ uv run python main.py test-notify
 
 LINEに届いた通知で次を確認します。
 
-1. `🎧 インターホン ON/OFF`でBotが切り替わり、操作結果が返信される
+1. `🎧 インターホンを聞く`でインターホン用Botが1回押され、操作結果が返信される
 2. `🔓 玄関を解錠`ではすぐに解錠されず、確認画面が表示される
 3. 確認画面の`キャンセル`ではBotが動かない
 4. 再度操作し、60秒以内に`解錠する`を選ぶと解錠用Botが1回だけ動く
@@ -174,13 +172,13 @@ Webhookをインターネット経由で確認する場合は、後述のLINE We
 
 チャイム検知時のLINE通知には次の2ボタンが表示されます。
 
-- `🎧 インターホン ON/OFF`: インターホン用Botの現在状態を取得し、`turnOn` / `turnOff`を切り替え
+- `🎧 インターホンを聞く`: インターホン用Botへ`press`を送信
 - `🔓 玄関を解錠`: 確認画面で「解錠する」を選んだ後、解錠用Botへ`press`を送信
 
 ### 1. SwitchBotを準備
 
-SwitchBotアプリで、インターホン用Botを**スイッチモード**、解錠用Botを**押すモード**に設定し、
-両方のクラウドサービスを有効にします。SwitchBot Hubも必要です。
+SwitchBotアプリで、インターホン用Botと解錠用Botの両方を**押すモード**に設定し、
+HubのBluetooth範囲内へ設置します。SwitchBot APIから操作するにはSwitchBot Hubが必要です。
 
 SwitchBotアプリ（v9.0以降）の「プロフィール → 設定 → アプリについて」でアプリバージョンを
 10回タップして「開発者向けオプション」を表示し、Open TokenとSecretを取得します。
@@ -217,9 +215,7 @@ Device IDがまだ分からない場合は、メニューの`1. デバイス一�
 ```bash
 ./scripts/test-switchbot devices       # アカウントのデバイス一覧
 ./scripts/test-switchbot status
-./scripts/test-switchbot intercom-on
-./scripts/test-switchbot intercom-off
-./scripts/test-switchbot intercom-toggle
+./scripts/test-switchbot intercom      # インターホン用Botを1回押す
 ./scripts/test-switchbot unlock       # 実行前に確認入力あり
 ```
 

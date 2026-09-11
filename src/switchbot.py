@@ -91,19 +91,5 @@ class SwitchBotClient:
             raise SwitchBotError("SwitchBotのデバイス状態を取得できませんでした")
         return body
 
-    def power(self, device_id: str) -> str:
-        """Return normalized ON/OFF state for a Bot in switch mode."""
-        body = self.status(device_id)
-        power = body.get("power") or body.get("powerState")
-        if not isinstance(power, str) or power.upper() not in {"ON", "OFF"}:
-            raise SwitchBotError("インターホン用BotのON/OFF状態を取得できませんでした")
-        return power.upper()
-
-    def toggle(self, device_id: str) -> str:
-        """Toggle a Bot in switch mode and return its new ON/OFF state."""
-        new_state = "OFF" if self.power(device_id) == "ON" else "ON"
-        self.command(device_id, "turnOn" if new_state == "ON" else "turnOff")
-        return new_state
-
     def press(self, device_id: str) -> None:
         self.command(device_id, "press")

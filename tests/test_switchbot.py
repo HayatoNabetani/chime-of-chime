@@ -35,20 +35,16 @@ class SwitchBotClientTest(unittest.TestCase):
         self.assertTrue(request.call_args.args[1].endswith("/devices"))
 
     @patch("src.switchbot.requests.request")
-    def test_toggle_turns_off_an_active_bot(self, request: Mock) -> None:
-        status = Mock()
-        status.raise_for_status.return_value = None
-        status.json.return_value = {"statusCode": 100, "body": {"power": "ON"}}
-        command = Mock()
-        command.raise_for_status.return_value = None
-        command.json.return_value = {"statusCode": 100, "message": "success"}
-        request.side_effect = [status, command]
+    def test_press_sends_press_command(self, request: Mock) -> None:
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"statusCode": 100, "message": "success"}
+        request.return_value = response
 
-        state = SwitchBotClient("token", "secret").toggle("device/id")
+        SwitchBotClient("token", "secret").press("device/id")
 
-        self.assertEqual(state, "OFF")
-        self.assertIn("device%2Fid", request.call_args_list[1].args[1])
-        self.assertEqual(request.call_args_list[1].kwargs["json"]["command"], "turnOff")
+        self.assertIn("device%2Fid", request.call_args.args[1])
+        self.assertEqual(request.call_args.kwargs["json"]["command"], "press")
 
     @patch("src.switchbot.requests.request")
     def test_api_error_raises(self, request: Mock) -> None:

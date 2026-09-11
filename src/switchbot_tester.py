@@ -57,15 +57,9 @@ def execute(action: str, *, assume_yes: bool = False) -> int:
             )
         elif action == "status":
             _show_status(client, intercom_id, unlock_id)
-        elif action == "intercom-on":
-            client.command(intercom_id, "turnOn")
-            print("✅ インターホン用SwitchBotをONにしました")
-        elif action == "intercom-off":
-            client.command(intercom_id, "turnOff")
-            print("✅ インターホン用SwitchBotをOFFにしました")
-        elif action == "intercom-toggle":
-            state = client.toggle(intercom_id)
-            print(f"✅ インターホン用SwitchBotを{state}にしました")
+        elif action == "intercom":
+            client.press(intercom_id)
+            print("✅ インターホン用SwitchBotのボタンを押しました")
         elif action == "unlock":
             if not assume_yes:
                 print("⚠️ 解錠テストは玄関のボタンを実際に押します。")
@@ -96,19 +90,15 @@ def interactive() -> int:
 SwitchBot 動作確認
   1. SwitchBotアカウントのデバイス一覧を確認
   2. 設定した2台の状態を確認
-  3. インターホンをON
-  4. インターホンをOFF
-  5. インターホンをON/OFF切替
-  6. 玄関解錠ボタンを押す（確認あり）
+  3. インターホン用ボタンを押す
+  4. 玄関解錠ボタンを押す（確認あり）
   0. 終了
 """
     choices = {
         "1": "devices",
         "2": "status",
-        "3": "intercom-on",
-        "4": "intercom-off",
-        "5": "intercom-toggle",
-        "6": "unlock",
+        "3": "intercom",
+        "4": "unlock",
     }
     while True:
         print(menu)
@@ -122,6 +112,6 @@ SwitchBot 動作確認
             return 0
         action = choices.get(choice)
         if action is None:
-            print("❌ 0〜6の番号を入力してください")
+            print("❌ 0〜4の番号を入力してください")
             continue
         execute(action)
