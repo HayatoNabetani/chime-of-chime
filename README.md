@@ -336,7 +336,52 @@ systemctl --user enable --now chime-detector.service
 systemctl --user status chime-detector.service        # Active: active (running) になればOK
 ```
 
-### 3. SSH切断後 / 再起動後も生き残らせる
+### 3. コード更新を常駐サービスへ反映
+
+別のPCで変更をpushした後、Raspberry PiへSSH接続して次を実行します。
+
+```bash
+cd ~/Desktop/dev/chime-of-chime
+
+# ローカルに意図しない変更がないことを確認してから更新
+git status --short
+git pull --ff-only
+
+# pyproject.toml / uv.lockの変更も反映
+uv sync --locked
+
+# 実機を動かさない自動テスト
+uv run python -m unittest discover -s tests -v
+
+# 実行中のPythonプロセスは自動更新されないため、必ず再起動
+systemctl --user restart chime-detector.service
+systemctl --user status chime-detector.service
+```
+
+最後に起動ログを確認します。
+
+```bash
+journalctl --user -u chime-detector.service -n 50 --no-pager
+```
+
+`git pull`だけでは、すでに起動しているサービスのコードは切り替わりません。
+`systemctl --user restart chime-detector.service`まで実行して反映完了です。
+
+`.env`、`chime_profile.json`、`recordings/`はGit管理外なので、通常の`git pull`では削除・上書きされません。
+`git status --short`に管理対象ファイルの変更が表示された場合は、pullする前に内容を確認してください。
+
+`scripts/chime-detector.service`自体が更新された場合だけ、インストール済みファイルとの差分を確認し、
+必要な変更を反映してからdaemon-reloadします。単純コピーすると、Pi用に調整したパスや
+`CHIME_DEVICE`を上書きする可能性があります。
+
+```bash
+diff -u ~/.config/systemd/user/chime-detector.service scripts/chime-detector.service
+# 必要な変更を手動反映した後
+systemctl --user daemon-reload
+systemctl --user restart chime-detector.service
+```
+
+### 4. SSH切断後 / 再起動後も生き残らせる
 
 ユーザサービスはデフォルトだとログアウト時に停止します。再起動後も含めて自走させるには **linger** を有効化:
 
@@ -346,7 +391,7 @@ sudo loginctl enable-linger $USER
 
 これで Pi をリブートしてもログイン不要で自動起動 → クラッシュ時は5秒後に自動再起動、になります。
 
-### 4. 動作確認
+### 5. 動作確認
 
 実際にチャイムを鳴らして、LINE通知が飛んでくることを確認します。ログをtailしながら鳴らすのが分かりやすい:
 
@@ -356,7 +401,7 @@ journalctl --user -u chime-detector.service -f
 
 `🔔 チャイム検知!` と `✅ LINE送信成功` が出れば完成。
 
-### 5. 運用コマンド
+### 6. 運用コマンド
 
 ```bash
 systemctl --user status chime-detector.service        # 状態確認
@@ -374,7 +419,7 @@ journalctl --user -u chime-detector.service | grep overflow | wc -l  # overflow�
 systemctl --user show chime-detector.service -p Environment
 ```
 
-### 6. トラブルシューティング
+### 7. トラブルシューティング
 
 #### `No journal files were found`
 
