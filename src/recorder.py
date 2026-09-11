@@ -5,16 +5,16 @@
 ChimeProfile として保存する。
 """
 
+import json
 import wave
 from dataclasses import dataclass
 from pathlib import Path
-from statistics import mean
 
 import numpy as np
 import sounddevice as sd
 
 from .features import extract_features
-from .profile import ChimeProfile, DEFAULT_PROFILE_PATH
+from .profile import DEFAULT_PROFILE_PATH, ChimeProfile
 
 
 @dataclass
@@ -32,7 +32,7 @@ class RecorderConfig:
     # 区間検出
     energy_rel_threshold: float = 0.2
     energy_abs_threshold: float = 0.005
-    gap_sec: float = 0.08          # この長さの無音があれば別区間
+    gap_sec: float = 0.08  # この長さの無音があれば別区間
     freq_jump_ratio: float = 0.08  # 周波数がこれ以上変わっても別区間
     min_segment_sec: float = 0.08
 
@@ -75,7 +75,7 @@ class ProfileRecorder:
         win = int(c.sample_rate * c.frame_win_sec)
         hop = int(c.sample_rate * c.frame_hop_sec)
         frames = []
-        for i in range(0, len(audio) - win, hop):
+        for i in range(0, len(audio) - win + 1, hop):
             seg = audio[i : i + win]
             f = extract_features(seg, c.sample_rate, c.freq_min, c.freq_max)
             frames.append(
@@ -122,9 +122,7 @@ class ProfileRecorder:
         if current:
             groups.append(current)
 
-        return [
-            g for g in groups if (g[-1]["t"] - g[0]["t"]) >= c.min_segment_sec
-        ]
+        return [g for g in groups if (g[-1]["t"] - g[0]["t"]) >= c.min_segment_sec]
 
     @staticmethod
     def _group_peak_freq(group: list[dict]) -> float:
@@ -182,7 +180,7 @@ class ProfileRecorder:
         flats = np.array([s["flatness"] for s in samples])
         proms = np.array([s["prominence"] for s in samples])
 
-        suggested_flat = round(float(flats.mean()) * 3.0 + 0.05, 3)
+        suggested_flat = round(min(float(flats.mean()) * 3.0 + 0.05, 1.0), 3)
         suggested_prom = round(max(float(proms.mean()) * 0.3, 3.0), 1)
 
         return ChimeProfile(
@@ -230,14 +228,14 @@ class ProfileRecorder:
 
         if len(samples) < 2:
             print("❌ 有効なサンプルが少なすぎます。もう一度お試しください。")
-            print(f"   録音は {self.output_dir} にあります。音量・雑音を確認してみてください。")
+            print(
+                f"   録音は {self.output_dir} にあります。音量・雑音を確認してみてください。"
+            )
             return None
 
         profile = self.build_profile(samples)
         out = profile.save(output_path)
         print(f"✅ プロファイル保存: {out}")
-        import json
-
         print(json.dumps(profile.to_dict(), indent=2, ensure_ascii=False))
         print(
             f"\n💡 誤検知が多い場合は検出器を以下の環境変数で起動してみてください:\n"

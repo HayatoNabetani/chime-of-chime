@@ -29,7 +29,7 @@ import sounddevice as sd
 
 from .features import SpectralFeatures, extract_features
 from .notifiers import Notifier, build_notifier_from_env
-from .profile import ChimeProfile, DEFAULT_PROFILE_PATH
+from .profile import DEFAULT_PROFILE_PATH, ChimeProfile
 
 
 def _parse_device(value: str | None) -> str | int | None:
@@ -144,9 +144,7 @@ class ChimeDetector:
             and now - self._last_notify_at < c.cooldown_sec
         )
 
-        feats = extract_features(
-            block, c.sample_rate, c.freq_min, c.freq_max
-        )
+        feats = extract_features(block, c.sample_rate, c.freq_min, c.freq_max)
 
         if feats.rms < c.energy_threshold:
             if (
@@ -160,12 +158,15 @@ class ChimeDetector:
 
         if c.debug and now - self._last_debug_log > 0.1:
             state = (
-                "CD" if in_cooldown
+                "CD"
+                if in_cooldown
                 else ("F1待ち" if self._f1_seen_at is None else "F2待ち")
             )
             tonal = (
-                "✓" if feats.flatness <= c.flatness_max
-                and feats.prominence >= c.prominence_min else "✗"
+                "✓"
+                if feats.flatness <= c.flatness_max
+                and feats.prominence >= c.prominence_min
+                else "✗"
             )
             print(
                 f"[{now:7.2f}s] peak={feats.peak_freq:6.1f}Hz "
@@ -237,19 +238,33 @@ def run(profile_path: str | Path = DEFAULT_PROFILE_PATH) -> None:
         dev_info = sd.query_devices(config.input_device, kind="input")
         print(f"🎙  入力デバイス: [{dev_info['index']}] {dev_info['name']}")
     except Exception as exc:  # noqa: BLE001
-        print(f"❌ 入力デバイスが見つかりません (CHIME_DEVICE={config.input_device!r}): {exc}")
+        print(
+            f"❌ 入力デバイスが見つかりません (CHIME_DEVICE={config.input_device!r}): {exc}"
+        )
         print("   `arecord -l` で card 番号を確認し CHIME_DEVICE で指定してください。")
-        print("   例: CHIME_DEVICE=\"USB PnP\"  (名前の部分一致。card番号がズレても追従)")
+        print('   例: CHIME_DEVICE="USB PnP"  (名前の部分一致。card番号がズレても追従)')
         raise SystemExit(1)
 
-    audio_q: queue.Queue[tuple[int, np.ndarray]] = queue.Queue()
+    # コールバックをブロックせず、処理遅延時のメモリ増加も防ぐ。
+    audio_q: queue.Queue[tuple[int, np.ndarray]] = queue.Queue(maxsize=64)
     samples_seen = 0
 
-    def callback(indata, frames, time_info, status):  # noqa: ANN001
+    def callback(indata, frames, time_info, status):
         nonlocal samples_seen
         if status:
             print(f"⚠️ stream status: {status}", file=sys.stderr)
-        audio_q.put((samples_seen, indata[:, 0].copy()))
+        item = (samples_seen, indata[:, 0].copy())
+        try:
+            audio_q.put_nowait(item)
+        except queue.Full:
+            try:
+                audio_q.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                audio_q.put_nowait(item)
+            except queue.Full:
+                pass
         samples_seen += frames
 
     print("🎤 検知開始 (Ctrl+Cで終了)\n")

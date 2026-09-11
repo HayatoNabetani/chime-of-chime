@@ -71,6 +71,88 @@ CHIME_DEBUG=1 uv run python main.py detect
 CHIME_DRY_RUN=1 uv run python main.py detect
 ```
 
+## テスト
+
+### 自動テスト
+
+依存関係をインストールした後、リポジトリのルートで実行します。
+
+```bash
+uv sync
+uv run python -m unittest discover -s tests -v
+```
+
+自動テストではSwitchBot API、LINE API、マイク入力をモックしているため、実際の通知送信や
+SwitchBotの物理操作は行いません。主に次の内容を確認しています。
+
+- SwitchBot OpenAPI v1.1の署名生成、デバイス取得、ON/OFF切替、APIエラー処理
+- LINE通知の2ボタン、Webhook署名検証、許可ユーザーの制限
+- 解錠の二段階確認、60秒の有効期限、確認トークンの再利用防止
+- プロファイルの保存・読み込み、録音フレームの境界処理
+
+### 静的チェック
+
+Ruffは`uvx`で一時実行するため、プロジェクトへの追加インストールは不要です。初回のみ
+Ruffのダウンロードが発生します。
+
+```bash
+uvx ruff check src tests main.py
+uvx ruff format --check src tests main.py
+python -m compileall -q src tests main.py
+sh -n scripts/test-switchbot
+```
+
+フォーマットを自動修正する場合:
+
+```bash
+uvx ruff check --fix src tests main.py
+uvx ruff format src tests main.py
+```
+
+### SwitchBot実機テスト
+
+最初に、物理操作を伴わないデバイス一覧・状態取得から確認します。
+
+```bash
+./scripts/test-switchbot devices
+./scripts/test-switchbot status
+```
+
+続いてインターホン用Botを確認します。以下は実際にBotを動かします。
+
+```bash
+./scripts/test-switchbot intercom-on
+./scripts/test-switchbot intercom-off
+./scripts/test-switchbot intercom-toggle
+```
+
+最後に、安全を確認したうえで解錠用Botをテストします。`unlock`と再入力しない限り実行されません。
+
+```bash
+./scripts/test-switchbot unlock
+```
+
+### LINE連携の結合テスト
+
+操作Webhookサーバーを起動した状態で、別のターミナルからテスト通知を送信します。
+
+```bash
+# ターミナル1
+uv run python main.py serve-actions
+
+# ターミナル2
+uv run python main.py test-notify
+```
+
+LINEに届いた通知で次を確認します。
+
+1. `🎧 インターホン ON/OFF`でBotが切り替わり、操作結果が返信される
+2. `🔓 玄関を解錠`ではすぐに解錠されず、確認画面が表示される
+3. 確認画面の`キャンセル`ではBotが動かない
+4. 再度操作し、60秒以内に`解錠する`を選ぶと解錠用Botが1回だけ動く
+
+Webhookをインターネット経由で確認する場合は、後述のLINE Webhook公開設定も必要です。
+
 ## 通知先の切り替え
 
 `.env`の`NOTIFIER`で制御(カンマ区切りで複数指定可):
@@ -93,7 +175,7 @@ CHIME_DRY_RUN=1 uv run python main.py detect
 チャイム検知時のLINE通知には次の2ボタンが表示されます。
 
 - `🎧 インターホン ON/OFF`: インターホン用Botの現在状態を取得し、`turnOn` / `turnOff`を切り替え
-- `🔓 玄関を解錠`: 解錠用Botへ`press`を送信
+- `🔓 玄関を解錠`: 確認画面で「解錠する」を選んだ後、解錠用Botへ`press`を送信
 
 ### 1. SwitchBotを準備
 
@@ -176,7 +258,7 @@ uv run python main.py test-notify
 ```
 
 > 解錠は安全に直結する操作です。Webhook URLだけに頼らず、署名検証を無効化しないでください。
-> LINEの再配信による同一イベントの二重実行はプロセス内で抑止します。
+> 解錠確認は60秒・1回限り有効です。LINEの再配信による同一イベントの二重実行も抑止します。
 
 ### Slack設定
 
@@ -388,6 +470,11 @@ chime-of-chime/
 ├── scripts/
 │   ├── chime-detector.service  systemdユーザサービステンプレ
 │   └── test-switchbot          SwitchBot対話テスト実行ファイル
+├── tests/
+│   ├── test_actions_and_notifier.py  LINE通知 / Webhook操作テスト
+│   ├── test_profile_and_recorder.py  プロファイル / 録音処理テスト
+│   ├── test_switchbot.py              SwitchBot APIクライアントテスト
+│   └── test_switchbot_tester.py       SwitchBotテストCLIテスト
 └── src/
     ├── features.py          FFT / スペクトル特徴量抽出
     ├── profile.py           ChimeProfile dataclass + I/O

@@ -9,7 +9,7 @@
 
 import os
 from abc import ABC, abstractmethod
-from typing import Iterable
+from collections.abc import Iterable
 
 import requests
 from dotenv import load_dotenv
@@ -102,9 +102,7 @@ class SlackNotifier(Notifier):
 
     def send(self, message: str) -> bool:
         try:
-            res = requests.post(
-                self.webhook_url, json={"text": message}, timeout=5
-            )
+            res = requests.post(self.webhook_url, json={"text": message}, timeout=5)
             res.raise_for_status()
             print(f"✅ Slack送信成功: {message}")
             return True
@@ -135,7 +133,9 @@ def _build_single(target: str) -> Notifier | None:
         token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
         user_id = os.getenv("LINE_USER_ID")
         if not token or not user_id:
-            print("⚠️ LINE_CHANNEL_ACCESS_TOKEN / LINE_USER_ID が未設定のためLINEを無効化")
+            print(
+                "⚠️ LINE_CHANNEL_ACCESS_TOKEN / LINE_USER_ID が未設定のためLINEを無効化"
+            )
             return None
         return LineNotifier(token, user_id)
     if target == "slack":

@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 from .switchbot import SwitchBotClient, SwitchBotError
 
 
-def _build_from_env(*, require_device_ids: bool = True) -> tuple[SwitchBotClient, str, str]:
+def _build_from_env(
+    *, require_device_ids: bool = True
+) -> tuple[SwitchBotClient, str, str]:
     load_dotenv()
     values = {
         "SWITCHBOT_TOKEN": os.getenv("SWITCHBOT_TOKEN"),
@@ -48,7 +50,11 @@ def execute(action: str, *, assume_yes: bool = False) -> int:
         )
 
         if action == "devices":
-            print(json.dumps(client.devices(), ensure_ascii=False, indent=2, sort_keys=True))
+            print(
+                json.dumps(
+                    client.devices(), ensure_ascii=False, indent=2, sort_keys=True
+                )
+            )
         elif action == "status":
             _show_status(client, intercom_id, unlock_id)
         elif action == "intercom-on":
@@ -63,7 +69,10 @@ def execute(action: str, *, assume_yes: bool = False) -> int:
         elif action == "unlock":
             if not assume_yes:
                 print("⚠️ 解錠テストは玄関のボタンを実際に押します。")
-                if input("実行する場合は unlock と入力してください: ").strip() != "unlock":
+                if (
+                    input("実行する場合は unlock と入力してください: ").strip()
+                    != "unlock"
+                ):
                     print("キャンセルしました")
                     return 1
             client.press(unlock_id)

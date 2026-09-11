@@ -1,9 +1,9 @@
 """argparseベースのCLIエントリーポイント。
 
-  python main.py record          プロファイル作成
-  python main.py detect          検知ループ開始
-  python main.py test-notify     通知先の疎通確認
-  python main.py switchbot-test  SwitchBotの動作確認
+python main.py record          プロファイル作成
+python main.py detect          検知ループ開始
+python main.py test-notify     通知先の疎通確認
+python main.py switchbot-test  SwitchBotの動作確認
 """
 
 import argparse

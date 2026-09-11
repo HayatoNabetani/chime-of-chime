@@ -29,7 +29,8 @@ class ActionControllerTest(unittest.TestCase):
         self.controller = ActionController(
             self.switchbot, "intercom", "unlock", "line-token", "allowed-user"
         )
-        self.controller._reply = Mock()
+        self.controller._reply_text = Mock()
+        self.controller._reply_unlock_confirmation = Mock()
 
     def event(self, action: str, event_id: str = "event-1") -> dict:
         return {
@@ -43,15 +44,49 @@ class ActionControllerTest(unittest.TestCase):
     def test_intercom_toggles_and_replies(self) -> None:
         self.controller.handle(self.event("action=intercom_toggle"))
         self.switchbot.toggle.assert_called_once_with("intercom")
-        self.controller._reply.assert_called_once_with(
+        self.controller._reply_text.assert_called_once_with(
             "reply", "🎧 インターホン音声をONにしました"
         )
 
-    def test_unlock_is_not_repeated_for_redelivery(self) -> None:
-        event = self.event("action=unlock")
-        self.controller.handle(event)
-        self.controller.handle(event)
+    def test_unlock_requires_confirmation(self) -> None:
+        self.controller.handle(self.event("action=unlock"))
+        self.switchbot.press.assert_not_called()
+        reply_args = self.controller._reply_unlock_confirmation.call_args.args
+        self.assertEqual(reply_args[0], "reply")
+        self.assertTrue(reply_args[1])
+
+    def test_confirmed_unlock_token_can_only_be_used_once(self) -> None:
+        self.controller.handle(self.event("action=unlock", "request"))
+        token = self.controller._reply_unlock_confirmation.call_args.args[1]
+        confirmed = f"action=unlock_confirmed&token={token}"
+        self.controller.handle(self.event(confirmed, "confirmation"))
+        self.controller.handle(self.event(confirmed, "second-confirmation"))
         self.switchbot.press.assert_called_once_with("unlock")
+
+    def test_expired_unlock_token_is_rejected(self) -> None:
+        self.controller.handle(self.event("action=unlock", "request"))
+        token = self.controller._reply_unlock_confirmation.call_args.args[1]
+        self.controller._unlock_confirmations[token] = 0
+        confirmed = f"action=unlock_confirmed&token={token}"
+        self.controller.handle(self.event(confirmed, "confirmation"))
+        self.switchbot.press.assert_not_called()
+        self.controller._reply_text.assert_called_once()
+
+    def test_confirmation_contains_one_time_token(self) -> None:
+        controller = ActionController(
+            self.switchbot, "intercom", "unlock", "line-token", "allowed-user"
+        )
+        controller._reply = Mock()
+        controller._reply_unlock_confirmation("reply", "one-time-token")
+        messages = controller._reply.call_args.args[1]
+        actions = messages[0]["template"]["actions"]
+        self.assertEqual(
+            actions[0]["data"],
+            "action=unlock_confirmed&token=one-time-token",
+        )
+        self.assertEqual(
+            actions[1]["data"], "action=unlock_cancel&token=one-time-token"
+        )
 
     def test_other_user_is_rejected(self) -> None:
         event = self.event("action=unlock")

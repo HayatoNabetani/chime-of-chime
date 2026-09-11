@@ -7,7 +7,6 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-
 DEFAULT_PROFILE_PATH = Path("chime_profile.json")
 
 
@@ -32,7 +31,11 @@ class ChimeProfile:
 
     def save(self, path: str | Path = DEFAULT_PROFILE_PATH) -> Path:
         p = Path(path)
-        p.write_text(json.dumps(self.to_dict(), indent=2, ensure_ascii=False))
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         return p
 
     @classmethod
@@ -43,7 +46,9 @@ class ChimeProfile:
                 f"プロファイルが見つかりません: {p}\n"
                 "  先に `python main.py record` を実行してください"
             )
-        data = json.loads(p.read_text())
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise TypeError(f"プロファイルの形式が不正です: {p}")
         # 未知フィールドを無視して互換性を保つ
         allowed = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in data.items() if k in allowed})
