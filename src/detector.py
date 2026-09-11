@@ -216,10 +216,12 @@ class ChimeDetector:
         if self.config.dry_run:
             print("   (DRY_RUN: 通知はスキップ)")
             return
-        self.notifier.send(self.config.notify_message)
+        self.notifier.send_chime(self.config.notify_message)
 
 
 def run(profile_path: str | Path = DEFAULT_PROFILE_PATH) -> None:
+    from .action_server import start_in_background_from_env
+
     profile = ChimeProfile.load(profile_path)
     print(
         f"📋 プロファイル: F1={profile.f1:.1f}Hz "
@@ -228,6 +230,7 @@ def run(profile_path: str | Path = DEFAULT_PROFILE_PATH) -> None:
 
     config = DetectorConfig.from_env(profile)
     notifier = build_notifier_from_env()
+    action_server = start_in_background_from_env()
     detector = ChimeDetector(profile, config, notifier)
 
     try:
@@ -266,6 +269,10 @@ def run(profile_path: str | Path = DEFAULT_PROFILE_PATH) -> None:
                 detector.process(block, now)
         except KeyboardInterrupt:
             print("\n👋 終了します")
+        finally:
+            if action_server is not None:
+                action_server.shutdown()
+                action_server.server_close()
 
 
 if __name__ == "__main__":

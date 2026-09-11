@@ -22,6 +22,10 @@ class Notifier(ABC):
     def send(self, message: str) -> bool:
         """メッセージを送信。成功ならTrueを返す。"""
 
+    def send_chime(self, message: str) -> bool:
+        """チャイム通知を送信。対応Notifierは操作UIを添える。"""
+        return self.send(message)
+
 
 class ConsoleNotifier(Notifier):
     """標準出力に出すだけ。開発/デバッグ用。"""
@@ -41,18 +45,45 @@ class LineNotifier(Notifier):
         self.user_id = user_id
 
     def send(self, message: str) -> bool:
+        return self._send_messages([{"type": "text", "text": message}], message)
+
+    def send_chime(self, message: str) -> bool:
+        payload = {
+            "type": "template",
+            "altText": f"{message}。インターホン・解錠操作があります。",
+            "template": {
+                "type": "buttons",
+                "title": "🔔 チャイムが鳴りました",
+                "text": "操作を選んでください",
+                "actions": [
+                    {
+                        "type": "postback",
+                        "label": "🎧 インターホン ON/OFF",
+                        "data": "action=intercom_toggle",
+                    },
+                    {
+                        "type": "postback",
+                        "label": "🔓 玄関を解錠",
+                        "data": "action=unlock",
+                    },
+                ],
+            },
+        }
+        return self._send_messages([payload], message)
+
+    def _send_messages(self, messages: list[dict], log_message: str) -> bool:
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.access_token}",
         }
         payload = {
             "to": self.user_id,
-            "messages": [{"type": "text", "text": message}],
+            "messages": messages,
         }
         try:
             res = requests.post(self.API_URL, headers=headers, json=payload, timeout=5)
             res.raise_for_status()
-            print(f"✅ LINE送信成功: {message}")
+            print(f"✅ LINE送信成功: {log_message}")
             return True
         except requests.RequestException as err:
             print(f"❌ LINE送信失敗: {err}")
@@ -90,6 +121,10 @@ class MultiNotifier(Notifier):
 
     def send(self, message: str) -> bool:
         results = [n.send(message) for n in self.notifiers]
+        return any(results)
+
+    def send_chime(self, message: str) -> bool:
+        results = [n.send_chime(message) for n in self.notifiers]
         return any(results)
 
 

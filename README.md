@@ -1,6 +1,7 @@
 # chime-of-chime
 
 マイクで拾った環境音からチャイム(ピンポーン等の2音パターン)を検出し、LINE/Slackへ通知するツール。
+LINE通知には、SwitchBotでインターホン音声をON/OFFするボタンと玄関を解錠するボタンを表示できます。
 Mac/Linux/Raspberry Pi で動作します。
 
 ## しくみ
@@ -86,6 +87,96 @@ CHIME_DRY_RUN=1 uv run python main.py detect
 1. [LINE Developers](https://developers.line.biz/) でMessaging APIチャネルを作成
 2. チャネルアクセストークン(長期)を発行 → `LINE_CHANNEL_ACCESS_TOKEN`
 3. Botと友だちになり、Webhook等で自身のUser IDを取得 → `LINE_USER_ID`
+
+## SwitchBot操作ボタン
+
+チャイム検知時のLINE通知には次の2ボタンが表示されます。
+
+- `🎧 インターホン ON/OFF`: インターホン用Botの現在状態を取得し、`turnOn` / `turnOff`を切り替え
+- `🔓 玄関を解錠`: 解錠用Botへ`press`を送信
+
+### 1. SwitchBotを準備
+
+SwitchBotアプリで、インターホン用Botを**スイッチモード**、解錠用Botを**押すモード**に設定し、
+両方のクラウドサービスを有効にします。SwitchBot Hubも必要です。
+
+SwitchBotアプリ（v9.0以降）の「プロフィール → 設定 → アプリについて」でアプリバージョンを
+10回タップして「開発者向けオプション」を表示し、Open TokenとSecretを取得します。
+各BotのDevice IDとともに`.env`へ設定してください。
+
+```dotenv
+NOTIFIER=line
+
+LINE_CHANNEL_ACCESS_TOKEN=...
+LINE_CHANNEL_SECRET=...
+LINE_USER_ID=U...
+
+SWITCHBOT_TOKEN=...
+SWITCHBOT_SECRET=...
+SWITCHBOT_INTERCOM_DEVICE_ID=...
+SWITCHBOT_UNLOCK_DEVICE_ID=...
+
+ACTION_SERVER_ENABLED=1
+ACTION_SERVER_PORT=8080
+```
+
+### 2. SwitchBot単体の動作確認
+
+LINE連携より先に2台のSwitchBotを確認できます。実行ファイルを起動すると対話メニューが表示されます。
+
+```bash
+./scripts/test-switchbot
+```
+
+Device IDがまだ分からない場合は、メニューの`1. デバイス一覧を確認`で一覧を取得できます。
+`.env`へ2台のIDを設定したら、`2. 設定した2台の状態を確認`で接続を確認してください。
+個別コマンドとしても実行できます。
+
+```bash
+./scripts/test-switchbot devices       # アカウントのデバイス一覧
+./scripts/test-switchbot status
+./scripts/test-switchbot intercom-on
+./scripts/test-switchbot intercom-off
+./scripts/test-switchbot intercom-toggle
+./scripts/test-switchbot unlock       # 実行前に確認入力あり
+```
+
+`unlock --yes`は確認なしで物理ボタンを押すため、自動テスト以外では使用を避けてください。
+
+### 3. LINE Webhookを公開
+
+LINEのpostbackを受けるため、Raspberry Piの`8080`番ポートをCloudflare TunnelなどでHTTPS公開し、
+LINE DevelopersのWebhook URLに次を設定します。
+
+```text
+https://<公開ホスト名>/line/webhook
+```
+
+Webhookの「利用」をONにし、「検証」が成功することを確認してください。受信時は
+`X-Line-Signature`を`LINE_CHANNEL_SECRET`で検証し、さらに`LINE_USER_ID`が一致する操作だけを許可します。
+
+`detect`実行中は操作サーバーも同じプロセス内で自動起動します。
+必要な設定が不足している場合は、操作不能なボタンを送らないよう起動時に停止します。
+
+```bash
+uv run python main.py detect
+```
+
+操作サーバーだけを単独起動したい場合は次を使います（この場合、`detect`側では
+`ACTION_SERVER_ENABLED=0`にしてポートの重複を避けてください）。
+
+```bash
+uv run python main.py serve-actions
+```
+
+通知UIだけを確認するには、操作サーバーを起動した状態で次を実行します。
+
+```bash
+uv run python main.py test-notify
+```
+
+> 解錠は安全に直結する操作です。Webhook URLだけに頼らず、署名検証を無効化しないでください。
+> LINEの再配信による同一イベントの二重実行はプロセス内で抑止します。
 
 ### Slack設定
 
@@ -295,12 +386,16 @@ chime-of-chime/
 ├── recordings/              プロファイル作成時の録音WAV
 ├── pyproject.toml
 ├── scripts/
-│   └── chime-detector.service  systemdユーザサービステンプレ
+│   ├── chime-detector.service  systemdユーザサービステンプレ
+│   └── test-switchbot          SwitchBot対話テスト実行ファイル
 └── src/
     ├── features.py          FFT / スペクトル特徴量抽出
     ├── profile.py           ChimeProfile dataclass + I/O
     ├── recorder.py          ProfileRecorder (録音→プロファイル抽出)
     ├── detector.py          ChimeDetector (リアルタイム検知)
+    ├── switchbot.py         SwitchBot OpenAPI v1.1クライアント
+    ├── switchbot_tester.py  SwitchBot単体テストCLI
+    ├── action_server.py     LINE postback受信 / SwitchBot操作
     ├── notifiers.py         Notifier ABC / LINE / Slack / Console / Multi
     └── cli.py               argparse サブコマンド
 ```

@@ -3,6 +3,7 @@
   python main.py record          プロファイル作成
   python main.py detect          検知ループ開始
   python main.py test-notify     通知先の疎通確認
+  python main.py switchbot-test  SwitchBotの動作確認
 """
 
 import argparse
@@ -28,8 +29,23 @@ def _cmd_detect(args: argparse.Namespace) -> int:
 
 def _cmd_test_notify(args: argparse.Namespace) -> int:
     notifier = build_notifier_from_env()
-    ok = notifier.send(args.message)
+    ok = notifier.send_chime(args.message)
     return 0 if ok else 1
+
+
+def _cmd_serve_actions(args: argparse.Namespace) -> int:
+    from .action_server import serve_from_env
+
+    serve_from_env()
+    return 0
+
+
+def _cmd_switchbot_test(args: argparse.Namespace) -> int:
+    from .switchbot_tester import execute, interactive
+
+    if args.action is None:
+        return interactive()
+    return execute(args.action, assume_yes=args.yes)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,6 +81,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="送信するメッセージ",
     )
     p_test.set_defaults(func=_cmd_test_notify)
+
+    p_actions = sub.add_parser("serve-actions", help="LINE操作Webhookサーバーを開始")
+    p_actions.set_defaults(func=_cmd_serve_actions)
+
+    p_switchbot = sub.add_parser("switchbot-test", help="SwitchBot 2台の動作確認")
+    p_switchbot.add_argument(
+        "action",
+        nargs="?",
+        choices=(
+            "devices",
+            "status",
+            "intercom-on",
+            "intercom-off",
+            "intercom-toggle",
+            "unlock",
+        ),
+        help="省略すると対話メニューを表示",
+    )
+    p_switchbot.add_argument(
+        "--yes",
+        action="store_true",
+        help="unlockの確認を省略（自動実行用途）",
+    )
+    p_switchbot.set_defaults(func=_cmd_switchbot_test)
 
     return parser
 
