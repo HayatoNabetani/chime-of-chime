@@ -1,7 +1,14 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "chime-of-chime-webhook",
-  "main": "src/index.js",
-  "compatibility_date": "2026-09-11",
-  "workers_dev": true
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "chime-of-chime-webhook",
+	"main": "src/index.js",
+	"compatibility_date": "2026-09-11",
+	"workers_dev": true,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "chime-of-chime-actions",
+			"database_id": "f7a18ea4-d939-45b3-9f4a-3733152bb068"
+		}
+	]
 }
