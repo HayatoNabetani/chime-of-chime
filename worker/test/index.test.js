@@ -14,7 +14,6 @@ const encoder = new TextEncoder();
 class FakeD1 {
   constructor() {
     this.events = new Set();
-    this.confirmations = new Map();
   }
 
   prepare(sql) {
@@ -31,30 +30,6 @@ class FakeD1 {
           if (database.events.has(eventId)) return { meta: { changes: 0 } };
           database.events.add(eventId);
           return { meta: { changes: 1 } };
-        }
-        if (sql.startsWith("INSERT INTO unlock_confirmations")) {
-          const [token, expiresAt] = this.args;
-          database.confirmations.set(token, { expiresAt, usedAt: null });
-          return { meta: { changes: 1 } };
-        }
-        if (sql.startsWith("UPDATE unlock_confirmations")) {
-          const [usedAt, token, now] = this.args;
-          const confirmation = database.confirmations.get(token);
-          if (
-            !confirmation ||
-            confirmation.usedAt !== null ||
-            confirmation.expiresAt <= now
-          ) {
-            return { meta: { changes: 0 } };
-          }
-          confirmation.usedAt = usedAt;
-          return { meta: { changes: 1 } };
-        }
-        if (sql.startsWith("DELETE FROM unlock_confirmations")) {
-          const [token] = this.args;
-          const confirmation = database.confirmations.get(token);
-          if (confirmation?.usedAt === null) database.confirmations.delete(token);
-          return { meta: { changes: confirmation ? 1 : 0 } };
         }
         throw new Error(`Unexpected SQL in test: ${sql}`);
       },
@@ -163,7 +138,7 @@ test("intercom postback presses only the intercom device", async (context) => {
   assert.equal(JSON.parse(requests[1].options.body).messages[0].type, "text");
 });
 
-test("unlock requires a one-time confirmation", async (context) => {
+test("unlock postback presses the unlock device in one tap", async (context) => {
   const originalFetch = globalThis.fetch;
   context.after(() => {
     globalThis.fetch = originalFetch;
@@ -180,38 +155,17 @@ test("unlock requires a one-time confirmation", async (context) => {
 
   await handlePostback(env, {
     type: "postback",
-    webhookEventId: "event-unlock-request",
-    replyToken: "reply-request",
+    webhookEventId: "event-unlock",
+    replyToken: "reply-token",
     source: { userId: "U123" },
     postback: { data: "action=unlock" },
   });
-  assert.equal(requests.length, 1);
-  const confirmation = JSON.parse(requests[0].options.body);
-  const confirmData = confirmation.messages[0].template.actions[0].data;
-  assert.match(confirmData, /^action=unlock_confirmed&token=/);
-
-  await handlePostback(env, {
-    type: "postback",
-    webhookEventId: "event-unlock-confirmed",
-    replyToken: "reply-confirmed",
-    source: { userId: "U123" },
-    postback: { data: confirmData },
-  });
-  assert.equal(requests.length, 3);
-  assert.match(requests[1].url, /unlock-device\/commands$/);
-
-  await handlePostback(env, {
-    type: "postback",
-    webhookEventId: "event-unlock-replayed",
-    replyToken: "reply-replayed",
-    source: { userId: "U123" },
-    postback: { data: confirmData },
-  });
-  assert.equal(requests.length, 4);
-  assert.doesNotMatch(requests[3].url, /switch-bot.com/);
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].url, /unlock-device\/commands$/);
+  assert.equal(JSON.parse(requests[0].options.body).command, "press");
   assert.match(
-    JSON.parse(requests[3].options.body).messages[0].text,
-    /有効期限/,
+    JSON.parse(requests[1].options.body).messages[0].text,
+    /解錠ボタン/,
   );
 });
 

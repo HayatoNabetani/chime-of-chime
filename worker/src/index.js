@@ -2,7 +2,6 @@ const LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply";
 const SWITCHBOT_API_BASE = "https://api.switch-bot.com/v1.1";
 const WEBHOOK_PATH = "/line/webhook";
 const MAX_BODY_BYTES = 1_000_000;
-const UNLOCK_CONFIRMATION_TTL_MS = 60_000;
 const EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 const encoder = new TextEncoder();
@@ -123,59 +122,12 @@ function replyText(env, replyToken, text) {
   return replyLine(env, replyToken, [{ type: "text", text }]);
 }
 
-function replyUnlockConfirmation(env, replyToken, token) {
-  return replyLine(env, replyToken, [
-    {
-      type: "template",
-      altText: "玄関を解錠しますか？",
-      template: {
-        type: "confirm",
-        text: "玄関を解錠しますか？",
-        actions: [
-          {
-            type: "postback",
-            label: "解錠する",
-            data: `action=unlock_confirmed&token=${token}`,
-          },
-          {
-            type: "postback",
-            label: "キャンセル",
-            data: `action=unlock_cancel&token=${token}`,
-          },
-        ],
-      },
-    },
-  ]);
-}
-
 async function claimEvent(db, eventId, now) {
   const result = await db
     .prepare(
       "INSERT OR IGNORE INTO processed_events (event_id, processed_at) VALUES (?, ?)",
     )
     .bind(eventId, now)
-    .run();
-  return result.meta?.changes === 1;
-}
-
-async function createUnlockConfirmation(db, now) {
-  const token = crypto.randomUUID();
-  await db
-    .prepare(
-      "INSERT INTO unlock_confirmations (token, expires_at, used_at) VALUES (?, ?, NULL)",
-    )
-    .bind(token, now + UNLOCK_CONFIRMATION_TTL_MS)
-    .run();
-  return token;
-}
-
-async function claimUnlockConfirmation(db, token, now) {
-  if (!token) return false;
-  const result = await db
-    .prepare(
-      "UPDATE unlock_confirmations SET used_at = ? WHERE token = ? AND used_at IS NULL AND expires_at > ?",
-    )
-    .bind(now, token, now)
     .run();
   return result.meta?.changes === 1;
 }
@@ -193,11 +145,7 @@ export async function handlePostback(env, event) {
 
   const params = new URLSearchParams(data);
   const action = params.get("action");
-  if (
-    !["intercom", "unlock", "unlock_confirmed", "unlock_cancel"].includes(
-      action,
-    )
-  ) {
+  if (!["intercom", "unlock"].includes(action)) {
     return;
   }
 
@@ -206,31 +154,6 @@ export async function handlePostback(env, event) {
   const replyToken = event.replyToken;
 
   if (action === "unlock") {
-    const token = await createUnlockConfirmation(env.DB, now);
-    await replyUnlockConfirmation(env, replyToken, token);
-    return;
-  }
-
-  const confirmationToken = params.get("token") ?? "";
-  if (action === "unlock_cancel") {
-    await env.DB.prepare(
-      "DELETE FROM unlock_confirmations WHERE token = ? AND used_at IS NULL",
-    )
-      .bind(confirmationToken)
-      .run();
-    await replyText(env, replyToken, "玄関の解錠をキャンセルしました");
-    return;
-  }
-
-  if (action === "unlock_confirmed") {
-    if (!(await claimUnlockConfirmation(env.DB, confirmationToken, now))) {
-      await replyText(
-        env,
-        replyToken,
-        "⌛ 解錠確認の有効期限が切れました。最初から操作してください",
-      );
-      return;
-    }
     await pressSwitchBot(env, env.SWITCHBOT_UNLOCK_DEVICE_ID);
     await replyText(env, replyToken, "🔓 玄関の解錠ボタンを押しました");
     return;
@@ -258,9 +181,6 @@ async function processEvents(env, events) {
   await env.DB.batch([
     env.DB
       .prepare("DELETE FROM processed_events WHERE processed_at < ?")
-      .bind(now - EVENT_RETENTION_MS),
-    env.DB
-      .prepare("DELETE FROM unlock_confirmations WHERE expires_at < ?")
       .bind(now - EVENT_RETENTION_MS),
   ]);
 }

@@ -92,7 +92,7 @@ SwitchBotの物理操作は行いません。主に次の内容を確認して�
 
 - SwitchBot OpenAPI v1.1の署名生成、デバイス取得、ボタン押下、APIエラー処理
 - LINE通知の2ボタン、Webhook署名検証、許可ユーザーの制限
-- 解錠の二段階確認、60秒の有効期限、確認トークンの再利用防止
+- 解錠の1タップ操作、LINE再配信による同一イベントの二重実行防止
 - プロファイルの保存・読み込み、録音フレームの境界処理
 
 ### 静的チェック
@@ -147,9 +147,7 @@ uv run python main.py test-notify
 LINEに届いた通知で次を確認します。
 
 1. `🎧 インターホンを聞く`でインターホン用Botが1回押され、操作結果が返信される
-2. `🔓 玄関を解錠`ではすぐに解錠されず、確認画面が表示される
-3. 確認画面の`キャンセル`ではBotが動かない
-4. 再度操作し、60秒以内に`解錠する`を選ぶと解錠用Botが1回だけ動く
+2. `🔓 玄関を解錠`で解錠用Botが1回押され、操作結果が返信される
 
 Workerのログは別のターミナルで確認できます。
 
@@ -180,7 +178,7 @@ npx wrangler tail
 チャイム検知時のLINE通知には次の2ボタンが表示されます。
 
 - `🎧 インターホンを聞く`: インターホン用Botへ`press`を送信
-- `🔓 玄関を解錠`: 確認画面で「解錠する」を選んだ後、解錠用Botへ`press`を送信
+- `🔓 玄関を解錠`: 解錠用Botへすぐに`press`を送信
 
 ### 1. SwitchBotを準備
 
@@ -248,7 +246,7 @@ npx wrangler login
 # D1データベースを作成し、DB bindingをwrangler.jsoncへ自動追記
 npx wrangler d1 create chime-of-chime-actions --location apac --binding DB --update-config
 
-# 二重実行防止・解錠確認用テーブルを作成
+# LINE再配信による二重実行防止テーブルを作成
 npx wrangler d1 execute chime-of-chime-actions --remote --file=./schema.sql
 ```
 
@@ -330,8 +328,9 @@ Workerを使わず、従来どおりRaspberry PiのPythonサーバーをCloudfla
 `https://<公開ホスト名>/line/webhook`をLINEへ設定してください。操作サーバーだけなら
 `uv run python main.py serve-actions`で起動できます。
 
-> 解錠は安全に直結する操作です。Workerは`X-Line-Signature`、`LINE_USER_ID`、60秒・1回限りの
-> 解錠確認を検証します。D1によりLINEの再配信による同一イベントの二重実行も抑止します。
+> 解錠は安全に直結する操作です。ボタンを押すと確認なしで直ちに実行されます。
+> Workerは`X-Line-Signature`と`LINE_USER_ID`を検証し、D1によりLINEの再配信による
+> 同一イベントの二重実行を抑止します。
 
 ### Slack設定
 
@@ -589,7 +588,7 @@ chime-of-chime/
 │   ├── chime-detector.service  systemdユーザサービステンプレ
 │   └── test-switchbot          SwitchBot対話テスト実行ファイル
 ├── worker/                  Cloudflare Worker版LINE Webhook
-│   ├── src/index.js         署名検証 / SwitchBot操作 / 解錠確認
+│   ├── src/index.js         署名検証 / SwitchBot操作 / 二重実行防止
 │   ├── test/index.test.js   Worker自動テスト
 │   ├── schema.sql           D1テーブル定義
 │   └── wrangler.jsonc       Cloudflare設定

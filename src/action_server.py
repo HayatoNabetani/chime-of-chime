@@ -7,9 +7,7 @@ import hashlib
 import hmac
 import json
 import os
-import secrets
 import threading
-import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -24,8 +22,6 @@ LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 
 
 class ActionController:
-    UNLOCK_CONFIRMATION_TTL_SEC = 60.0
-
     def __init__(
         self,
         switchbot: SwitchBotClient,
@@ -42,7 +38,6 @@ class ActionController:
         self._lock = threading.Lock()
         self._seen_ids: deque[str] = deque(maxlen=256)
         self._seen_set: set[str] = set()
-        self._unlock_confirmations: dict[str, float] = {}
 
     def _mark_once(self, event_id: str) -> bool:
         with self._lock:
@@ -67,12 +62,7 @@ class ActionController:
             return
         params = parse_qs(postback["data"], keep_blank_values=True)
         action = params.get("action", [""])[0]
-        if action not in {
-            "intercom",
-            "unlock",
-            "unlock_confirmed",
-            "unlock_cancel",
-        }:
+        if action not in {"intercom", "unlock"}:
             return
 
         event_id = event.get("webhookEventId")
@@ -80,54 +70,16 @@ class ActionController:
             return
 
         reply_token = event.get("replyToken")
-        if action == "unlock":
-            token = secrets.token_urlsafe(18)
-            with self._lock:
-                now = time.monotonic()
-                self._unlock_confirmations = {
-                    key: expiry
-                    for key, expiry in self._unlock_confirmations.items()
-                    if expiry > now
-                }
-                self._unlock_confirmations[token] = (
-                    now + self.UNLOCK_CONFIRMATION_TTL_SEC
-                )
-            if isinstance(reply_token, str):
-                self._reply_unlock_confirmation(reply_token, token)
-            print("🔐 玄関解錠の確認を送信しました")
-            return
-
-        confirmation_token = params.get("token", [""])[0]
-        if action == "unlock_cancel":
-            with self._lock:
-                self._unlock_confirmations.pop(confirmation_token, None)
-            if isinstance(reply_token, str):
-                self._reply_text(reply_token, "玄関の解錠をキャンセルしました")
-            return
-
         try:
             with self._lock:
                 if action == "intercom":
                     self.switchbot.press(self.intercom_device_id)
                     result = "🎧 インターホン用ボタンを押しました"
-                elif action == "unlock_confirmed":
-                    expires_at = self._unlock_confirmations.pop(
-                        confirmation_token, None
-                    )
-                    if expires_at is None or expires_at <= time.monotonic():
-                        result = None
-                    else:
-                        self.switchbot.press(self.unlock_device_id)
-                        result = "🔓 玄関の解錠ボタンを押しました"
+                elif action == "unlock":
+                    self.switchbot.press(self.unlock_device_id)
+                    result = "🔓 玄関の解錠ボタンを押しました"
                 else:
                     return
-            if result is None:
-                if isinstance(reply_token, str):
-                    self._reply_text(
-                        reply_token,
-                        "⌛ 解錠確認の有効期限が切れました。最初から操作してください",
-                    )
-                return
             print(f"✅ {result}")
         except SwitchBotError as exc:
             result = f"❌ 操作に失敗しました\n{exc}"
@@ -138,33 +90,6 @@ class ActionController:
 
     def _reply_text(self, reply_token: str, message: str) -> None:
         self._reply(reply_token, [{"type": "text", "text": message}])
-
-    def _reply_unlock_confirmation(self, reply_token: str, token: str) -> None:
-        self._reply(
-            reply_token,
-            [
-                {
-                    "type": "template",
-                    "altText": "玄関を解錠しますか？",
-                    "template": {
-                        "type": "confirm",
-                        "text": "玄関を解錠しますか？",
-                        "actions": [
-                            {
-                                "type": "postback",
-                                "label": "解錠する",
-                                "data": f"action=unlock_confirmed&token={token}",
-                            },
-                            {
-                                "type": "postback",
-                                "label": "キャンセル",
-                                "data": f"action=unlock_cancel&token={token}",
-                            },
-                        ],
-                    },
-                }
-            ],
-        )
 
     def _reply(self, reply_token: str, messages: list[dict[str, Any]]) -> None:
         try:
